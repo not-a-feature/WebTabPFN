@@ -16,16 +16,28 @@ WebTabPFN is distributed as a classic browser script, not an ESM/CommonJS import
 ```html
 <script src="https://cdn.jsdelivr.net/npm/webtabpfn@0.2.0/src/webtabpfn.js"></script>
 <script>
-  const classifier = await WebTabPFN.load({ task: "classification", backend: "wasm", precision: "int8" });
+  const classifier = await WebTabPFN.load({
+    task: "classification",
+    backend: "wasm",
+    precision: "int8"
+  });
   classifier.fit(
-    [[0.1, "low"], [0.2, "low"], [1.1, "high"], [0.9, "high"]],
+    [[0.1, "low"],
+     [0.2, "low"],
+     [1.1, "high"],
+     [0.9, "high"]],
     ["control", "control", "case", "case"],
   );
   console.log(await classifier.predict([[0.8, "high"]]));
   console.log(await classifier.predictProba([[0.8, "high"]]));
 
-  const regressor = await WebTabPFN.load({ task: "regression", backend: "wasm", precision: "int8" });
-  regressor.fit([[0], [1], [2], [3]], [1, 3, 5, 7]);
+  const regressor = await WebTabPFN.load({
+    task: "regression",
+    backend: "wasm",
+    precision: "int8" });
+  regressor.fit(
+    [[0], [1], [2], [3]],
+    [1, 3, 5, 7]);
   console.log(await regressor.predict([[1.5], [4]]));
 </script>
 ```
