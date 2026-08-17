@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 2,
+  "createdAt": "2026-08-17T12:33:31.028Z",
+  "kind": "browser",
+  "environment": {
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
+    "platform": "Win32",
+    "hardwareConcurrency": 22,
+    "crossOriginIsolated": false,
+    "webgpuAvailable": true,
+    "adapter": {
+      "vendor": "intel",
+      "architecture": "xe-lpg",
+      "device": "",
+      "description": "",
+      "isFallbackAdapter": false
+    }
+  },
+  "benchmark": {
+    "runs": 1,
+    "warmups": 0,
+    "cases": [
+      "breast_cancer"
+    ]
+  },
+  "configurations": [
+    {
+      "backend": "webgpu",
+      "precision": "fp16",
+      "status": "error",
+      "error": "softmax denominator is invalid"
+    },
+    {
+      "backend": "webgpu",
+      "precision": "fp8",
+      "status": "error",
+      "error": "Can't create a session. ERROR_CODE: 9, ERROR_MESSAGE: "
+    }
+  ]
+}
