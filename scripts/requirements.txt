@@ -1,10 +1,10 @@
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 export-tabpfn @ git+https://github.com/DataZooDE/anofox-tabfm@e5021d956b1a9af8d459abc1acd3f5033deb31c8#subdirectory=tools/export_tabpfn
-numpy>=1.26,<3
-onnx>=1.17,<2
+numpy==2.4.6
+onnx==1.22.0
 onnxruntime==1.27.0
-psutil>=6,<8
-scikit-learn>=1.6,<2
+psutil==7.2.2
+scikit-learn==1.9.0
 tabpfn==8.1.0
-torch>=2.6,<3
+torch==2.13.0

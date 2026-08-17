@@ -1,4 +1,7 @@
 
+WebTabPFN source code is licensed under Apache License 2.0 below. Bundled TabPFN model
+weights are covered separately by src/TABPFN_MODEL_LICENSE.txt.
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/

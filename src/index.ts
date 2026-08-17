@@ -1,7 +1,9 @@
 import { clearModelCache, getModel, isModelCached } from "./cache";
-import type { Backend, ConcreteBackend, ModelSpec, Precision } from "./models";
-import { hasWebGpu, models, resolveBackend, selectModel } from "./models";
-import type { PredictionResult } from "./runtime";
+import type { Backend, ModelSpec, Precision, Task } from "./models";
+import { hasWebGpu, models, selectModel } from "./models";
+import type { ClassificationLabel, FeatureMatrix, FitOptions } from "./preprocessing";
+import { encodeLabels, FeaturePreprocessor, validateRegressionTargets } from "./preprocessing";
+import type { InferenceInfo, RegressionResult } from "./runtime";
 import { TabPFNSession } from "./runtime";
 
 const currentScript = typeof document === "undefined" ? undefined : document.currentScript;
@@ -14,16 +16,22 @@ const scriptUrl = typeof HTMLScriptElement !== "undefined"
 const defaultBaseUrl = new URL(".", scriptUrl).href;
 
 export interface LoadOptions {
-  readonly backend?: Backend;
-  readonly precision?: Precision;
+  readonly task: Task;
+  readonly backend: Backend;
+  readonly precision: Precision;
   readonly baseUrl?: string | URL;
   readonly runtimeBaseUrl?: string | URL;
   readonly cache?: boolean;
 }
 
+export interface CacheOptions {
+  readonly task: Task;
+  readonly precision: Precision;
+  readonly baseUrl?: string | URL;
+}
+
 export interface LoadInfo {
-  readonly backend: ConcreteBackend;
-  readonly fallbackReason?: string;
+  readonly backend: Backend;
   readonly model: ModelSpec;
   readonly fromCache: boolean;
   readonly modelLoadMs: number;
@@ -31,9 +39,72 @@ export interface LoadInfo {
   readonly modelUrl: string;
 }
 
+export interface ClassificationResult extends InferenceInfo {
+  readonly probabilities: readonly (readonly number[])[];
+  readonly predictions: readonly ClassificationLabel[];
+}
+
 export class TabPFNClassifier {
   readonly info: LoadInfo;
   readonly #session: TabPFNSession;
+  #preprocessor: FeaturePreprocessor | undefined;
+  #xTrain: number[][] | undefined;
+  #yTrain: readonly number[] | undefined;
+  #classes: readonly ClassificationLabel[] | undefined;
+
+  constructor(session: TabPFNSession, info: LoadInfo) {
+    this.#session = session;
+    this.info = info;
+  }
+
+  get classes(): readonly ClassificationLabel[] {
+    if (this.#classes === undefined) throw new Error("fit() must be called first");
+    return this.#classes;
+  }
+
+  fit(xTrain: FeatureMatrix, yTrain: readonly ClassificationLabel[], options: FitOptions = {}): this {
+    assertTrainingRows(xTrain, yTrain);
+    const preprocessor = FeaturePreprocessor.fit(xTrain, options.categoricalFeatures);
+    const encoded = encodeLabels(yTrain);
+    const transformed = preprocessor.transform(xTrain, "xTrain");
+    this.#preprocessor = preprocessor;
+    this.#xTrain = transformed;
+    this.#yTrain = encoded.values;
+    this.#classes = encoded.classes;
+    return this;
+  }
+
+  async infer(xTest: FeatureMatrix): Promise<ClassificationResult> {
+    if (this.#preprocessor === undefined || this.#xTrain === undefined || this.#yTrain === undefined || this.#classes === undefined) {
+      throw new Error("fit() must be called first");
+    }
+    const transformed = this.#preprocessor.transform(xTest, "xTest");
+    const result = await this.#session.predictClassification({ x: [...this.#xTrain, ...transformed], yTrain: this.#yTrain });
+    const predictions = result.predictions.map((index) => {
+      const label = this.#classes![index];
+      if (label === undefined) throw new Error(`model predicted unknown class ${index}`);
+      return label;
+    });
+    return { ...result, predictions };
+  }
+
+  async predict(xTest: FeatureMatrix): Promise<readonly ClassificationLabel[]> {
+    return (await this.infer(xTest)).predictions;
+  }
+
+  async predictProba(xTest: FeatureMatrix): Promise<readonly (readonly number[])[]> {
+    return (await this.infer(xTest)).probabilities;
+  }
+
+  async dispose(): Promise<void> {
+    await this.#session.dispose();
+  }
+}
+
+export class TabPFNRegressor {
+  readonly info: LoadInfo;
+  readonly #session: TabPFNSession;
+  #preprocessor: FeaturePreprocessor | undefined;
   #xTrain: number[][] | undefined;
   #yTrain: number[] | undefined;
 
@@ -42,89 +113,88 @@ export class TabPFNClassifier {
     this.info = info;
   }
 
-  fit(xTrain: readonly (readonly number[])[], yTrain: readonly number[]): this {
-    if (xTrain.length !== yTrain.length) throw new Error("xTrain and yTrain lengths differ");
-    if (xTrain.length < 2) throw new Error("training data must contain at least two rows");
-    this.#xTrain = xTrain.map((row) => [...row]);
-    this.#yTrain = [...yTrain];
+  fit(xTrain: FeatureMatrix, yTrain: readonly number[], options: FitOptions = {}): this {
+    assertTrainingRows(xTrain, yTrain);
+    const preprocessor = FeaturePreprocessor.fit(xTrain, options.categoricalFeatures);
+    const transformed = preprocessor.transform(xTrain, "xTrain");
+    const targets = validateRegressionTargets(yTrain);
+    this.#preprocessor = preprocessor;
+    this.#xTrain = transformed;
+    this.#yTrain = targets;
     return this;
   }
 
-  async infer(xTest: readonly (readonly number[])[]): Promise<PredictionResult> {
-    if (this.#xTrain === undefined || this.#yTrain === undefined) throw new Error("fit() must be called first");
-    if (xTest.length === 0) throw new Error("xTest must contain at least one row");
-    return this.#session.predict({ x: [...this.#xTrain, ...xTest], yTrain: this.#yTrain });
+  async infer(xTest: FeatureMatrix): Promise<RegressionResult> {
+    if (this.#preprocessor === undefined || this.#xTrain === undefined || this.#yTrain === undefined) {
+      throw new Error("fit() must be called first");
+    }
+    const transformed = this.#preprocessor.transform(xTest, "xTest");
+    return this.#session.predictRegression({ x: [...this.#xTrain, ...transformed], yTrain: this.#yTrain });
   }
 
-  async predict(xTest: readonly (readonly number[])[]): Promise<readonly number[]> {
+  async predict(xTest: FeatureMatrix): Promise<readonly number[]> {
     return (await this.infer(xTest)).predictions;
   }
 
-  async predictProba(xTest: readonly (readonly number[])[]): Promise<readonly (readonly number[])[]> {
-    return (await this.infer(xTest)).probabilities;
+  async dispose(): Promise<void> {
+    await this.#session.dispose();
   }
 }
 
-export async function preload(options: LoadOptions = {}): Promise<Omit<LoadInfo, "sessionCreateMs">> {
-  const backend = resolveBackend(options.backend);
-  const model = selectModel(backend, options.precision);
+export async function preload(options: LoadOptions): Promise<Omit<LoadInfo, "sessionCreateMs">> {
+  const backend = options.backend;
+  const model = selectModel(options.task, options.precision);
   const baseUrl = resolveUrl(options.baseUrl ?? defaultBaseUrl);
   const loaded = await getModel(model, baseUrl, options.cache !== false);
-  return {
-    backend,
-    model,
-    fromCache: loaded.fromCache,
-    modelLoadMs: loaded.elapsedMs,
-    modelUrl: loaded.url,
-  };
+  return { backend, model, fromCache: loaded.fromCache, modelLoadMs: loaded.elapsedMs, modelUrl: loaded.url };
 }
 
-export async function load(options: LoadOptions = {}): Promise<TabPFNClassifier> {
-  const requested = options.backend ?? "auto";
-  const backend = resolveBackend(requested);
-  if (requested !== "auto" || backend === "wasm") return loadWithBackend(options, backend);
-  try {
-    return await loadWithBackend(options, "webgpu");
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    return loadWithBackend(options, "wasm", `WebGPU failed: ${reason}`);
-  }
+export function load(options: LoadOptions & { readonly task: "classification" }): Promise<TabPFNClassifier>;
+export function load(options: LoadOptions & { readonly task: "regression" }): Promise<TabPFNRegressor>;
+export async function load(options: LoadOptions): Promise<TabPFNClassifier | TabPFNRegressor> {
+  return loadWithBackend(options, options.backend);
 }
 
 async function loadWithBackend(
   options: LoadOptions,
-  backend: ConcreteBackend,
-  fallbackReason?: string,
-): Promise<TabPFNClassifier> {
-  const model = selectModel(backend, options.precision);
+  backend: Backend,
+): Promise<TabPFNClassifier | TabPFNRegressor> {
+  const model = selectModel(options.task, options.precision);
   const baseUrl = resolveUrl(options.baseUrl ?? defaultBaseUrl);
   const loaded = await getModel(model, baseUrl, options.cache !== false);
   const sessionStarted = performance.now();
   const session = await TabPFNSession.create(
     loaded.bytes,
     backend,
+    model.task,
     resolveUrl(options.runtimeBaseUrl ?? baseUrl),
-    fallbackReason,
   );
-  return new TabPFNClassifier(session, {
+  const info: LoadInfo = {
     backend,
-    ...(fallbackReason === undefined ? {} : { fallbackReason }),
     model,
     fromCache: loaded.fromCache,
     modelLoadMs: loaded.elapsedMs,
     sessionCreateMs: performance.now() - sessionStarted,
     modelUrl: loaded.url,
-  });
+  };
+  return options.task === "classification" ? new TabPFNClassifier(session, info) : new TabPFNRegressor(session, info);
 }
 
-export async function isCached(precision?: Precision, baseUrl: string | URL = defaultBaseUrl): Promise<boolean> {
-  const model = models[precision ?? (hasWebGpu() ? "int4" : "int8")];
-  return isModelCached(model, resolveUrl(baseUrl));
+export async function isCached(options: CacheOptions): Promise<boolean> {
+  const model = selectModel(options.task, options.precision);
+  return isModelCached(model, resolveUrl(options.baseUrl ?? defaultBaseUrl));
 }
 
 export const clearCache = clearModelCache;
 export { hasWebGpu, models };
-export type { Backend, ConcreteBackend, ModelSpec, Precision, PredictionResult };
+export type { Backend, ModelSpec, Precision, Task } from "./models";
+export type { ClassificationLabel, FeatureMatrix, FeatureValue, FitOptions } from "./preprocessing";
+export type { RegressionResult } from "./runtime";
+
+function assertTrainingRows(xTrain: FeatureMatrix, yTrain: readonly unknown[]): void {
+  if (xTrain.length !== yTrain.length) throw new Error("xTrain and yTrain lengths differ");
+  if (xTrain.length < 2) throw new Error("training data must contain at least two rows");
+}
 
 function resolveUrl(value: string | URL): string {
   return new URL(value, pageUrl).href;

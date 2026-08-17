@@ -1,8 +1,8 @@
 {
   "name": "webtabpfn",
-  "version": "0.1.0",
-  "description": "Zero-install TabPFN inference for browsers with WebGPU and WASM fallback",
-  "license": "Apache-2.0",
+  "version": "0.2.0",
+  "description": "Zero-install TabPFN classification and regression for browsers",
+  "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/not-a-feature/WebTabPFN.git"
@@ -25,7 +25,8 @@
     "src/webtabpfn.js",
     "src/ort-wasm-simd-threaded.asyncify.mjs",
     "src/ort-wasm-simd-threaded.asyncify.wasm",
-    "src/models/*.onnx",
+    "src/models/*-int4-*.onnx",
+    "src/models/*-int8-*.onnx",
     "src/TABPFN_MODEL_LICENSE.txt",
     "src/ONNXRUNTIME_LICENSE.txt",
     "src/ONNXRUNTIME_THIRD_PARTY_NOTICES.txt"
@@ -35,11 +36,12 @@
   },
   "scripts": {
     "build": "tsc --noEmit && node scripts/build.mjs",
+    "check:package": "pnpm pack --dry-run",
     "plot:benchmark": "python scripts/plot-benchmarks.py",
-    "start": "python -m http.server 8000",
+    "start": "python -m http.server 4173",
     "test": "vitest run tests/unit",
     "test:browser": "pnpm build && playwright test --config tests/playwright.config.ts",
-    "prepublishOnly": "pnpm test && pnpm test:browser"
+    "prepublishOnly": "pnpm test && pnpm test:browser && pnpm check:package"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",

@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 414" width="960" height="414" role="img" aria-label="MCC averaged across benchmark datasets">
+<style>
+      text { font-family: ui-sans-serif, system-ui, sans-serif; fill: #172033 }
+      .axis { font-size: 12px; fill: #526070 }
+      .label { font-size: 13px }
+      .bar-value { font-size: 11px; font-weight: 600 }
+      .grid { stroke: #d9e0e8; stroke-width: 1 }
+    </style>
+<title>MCC averaged across benchmark datasets</title>
+<line class="grid" x1="235.0" y1="60" x2="235.0" y2="356"/>
+<text class="axis" x="235.0" y="378" text-anchor="middle">0.87</text>
+<line class="grid" x1="373.0" y1="60" x2="373.0" y2="356"/>
+<text class="axis" x="373.0" y="378" text-anchor="middle">0.89</text>
+<line class="grid" x1="511.0" y1="60" x2="511.0" y2="356"/>
+<text class="axis" x="511.0" y="378" text-anchor="middle">0.92</text>
+<line class="grid" x1="649.0" y1="60" x2="649.0" y2="356"/>
+<text class="axis" x="649.0" y="378" text-anchor="middle">0.95</text>
+<line class="grid" x1="787.0" y1="60" x2="787.0" y2="356"/>
+<text class="axis" x="787.0" y="378" text-anchor="middle">0.97</text>
+<line class="grid" x1="925.0" y1="60" x2="925.0" y2="356"/>
+<text class="axis" x="925.0" y="378" text-anchor="middle">1.00</text>
+<text class="label" x="225" y="91.0" text-anchor="end">browser webgpu/fp32</text>
+<rect x="235" y="75" width="294.8" height="24" rx="3" fill="#6EA6DD" fill-opacity="1.00"><title>browser webgpu/fp32 · MCC: 0.9235</title></rect>
+<text class="bar-value" x="534.8" y="95" text-anchor="start">0.924</text>
+<text class="label" x="225" y="137.0" text-anchor="end">browser webgpu/int4</text>
+<rect x="235" y="121" width="269.7" height="24" rx="3" fill="#6EA6DD" fill-opacity="1.00"><title>browser webgpu/int4 · MCC: 0.9187</title></rect>
+<text class="bar-value" x="509.7" y="141" text-anchor="start">0.919</text>
+<text class="label" x="225" y="183.0" text-anchor="end">browser webgpu/int8</text>
+<rect x="235" y="167" width="258.4" height="24" rx="3" fill="#6EA6DD" fill-opacity="1.00"><title>browser webgpu/int8 · MCC: 0.9165</title></rect>
+<text class="bar-value" x="498.4" y="187" text-anchor="start">0.917</text>
+<text class="label" x="225" y="229.0" text-anchor="end">browser wasm/fp32</text>
+<rect x="235" y="213" width="294.8" height="24" rx="3" fill="#E9A35E" fill-opacity="1.00"><title>browser wasm/fp32 · MCC: 0.9235</title></rect>
+<text class="bar-value" x="534.8" y="233" text-anchor="start">0.924</text>
+<text class="label" x="225" y="275.0" text-anchor="end">browser wasm/int4</text>
+<rect x="235" y="259" width="269.7" height="24" rx="3" fill="#E9A35E" fill-opacity="1.00"><title>browser wasm/int4 · MCC: 0.9187</title></rect>
+<text class="bar-value" x="509.7" y="279" text-anchor="start">0.919</text>
+<text class="label" x="225" y="321.0" text-anchor="end">browser wasm/int8</text>
+<rect x="235" y="305" width="280.0" height="24" rx="3" fill="#E9A35E" fill-opacity="1.00"><title>browser wasm/int8 · MCC: 0.9207</title></rect>
+<text class="bar-value" x="520.0" y="325" text-anchor="start">0.921</text>
+<line x1="638.7" y1="60" x2="638.7" y2="356" stroke="#98A4B3" stroke-width="3" stroke-dasharray="8 6"><title>Native H100 GPU MCC</title></line>
+<rect x="760" y="24" width="12" height="12" fill="#6EA6DD"/>
+<text class="axis" x="777" y="35">WebGPU</text>
+<rect x="860" y="24" width="12" height="12" fill="#E9A35E"/>
+<text class="axis" x="877" y="35">WASM</text>
+<line x1="235" y1="53" x2="263" y2="53" stroke="#98A4B3" stroke-width="3" stroke-dasharray="8 6"/>
+<text class="axis" x="270" y="57">Native H100 GPU MCC</text>
+<text class="axis" x="580.0" y="402" text-anchor="middle">Matthews correlation coefficient</text>
+</svg>

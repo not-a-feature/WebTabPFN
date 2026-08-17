@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 460" width="960" height="460" role="img" aria-label="Inference latency averaged across benchmark datasets (ms)">
+<style>
+      text { font-family: ui-sans-serif, system-ui, sans-serif; fill: #172033 }
+      .axis { font-size: 12px; fill: #526070 }
+      .label { font-size: 13px }
+      .bar-value { font-size: 11px; font-weight: 600 }
+      .grid { stroke: #d9e0e8; stroke-width: 1 }
+    </style>
+<title>Inference latency averaged across benchmark datasets (ms)</title>
+<line class="grid" x1="235.0" y1="60" x2="235.0" y2="402"/>
+<text class="axis" x="235.0" y="424" text-anchor="middle">0</text>
+<line class="grid" x1="373.0" y1="60" x2="373.0" y2="402"/>
+<text class="axis" x="373.0" y="424" text-anchor="middle">280</text>
+<line class="grid" x1="511.0" y1="60" x2="511.0" y2="402"/>
+<text class="axis" x="511.0" y="424" text-anchor="middle">560</text>
+<line class="grid" x1="649.0" y1="60" x2="649.0" y2="402"/>
+<text class="axis" x="649.0" y="424" text-anchor="middle">840</text>
+<line class="grid" x1="787.0" y1="60" x2="787.0" y2="402"/>
+<text class="axis" x="787.0" y="424" text-anchor="middle">1121</text>
+<line class="grid" x1="925.0" y1="60" x2="925.0" y2="402"/>
+<text class="axis" x="925.0" y="424" text-anchor="middle">1401</text>
+<text class="label" x="225" y="96.5" text-anchor="end">browser webgpu/fp32</text>
+<rect x="235" y="75" width="105.1" height="16" rx="3" fill="#6EA6DD" fill-opacity="1.00"><title>browser webgpu/fp32 · p50: 213.2500</title></rect>
+<text class="bar-value" x="345.1" y="87" text-anchor="start">213.2</text>
+<rect x="235" y="94" width="110.0" height="16" rx="3" fill="#6EA6DD" fill-opacity="0.58"><title>browser webgpu/fp32 · p95: 223.3425</title></rect>
+<text class="bar-value" x="350.0" y="106" text-anchor="start">223.3</text>
+<text class="label" x="225" y="142.5" text-anchor="end">browser webgpu/int4</text>
+<rect x="235" y="121" width="72.7" height="16" rx="3" fill="#6EA6DD" fill-opacity="1.00"><title>browser webgpu/int4 · p50: 147.6500</title></rect>
+<text class="bar-value" x="312.7" y="133" text-anchor="start">147.6</text>
+<rect x="235" y="140" width="76.3" height="16" rx="3" fill="#6EA6DD" fill-opacity="0.58"><title>browser webgpu/int4 · p95: 154.7875</title></rect>
+<text class="bar-value" x="316.3" y="152" text-anchor="start">154.8</text>
+<text class="label" x="225" y="188.5" text-anchor="end">browser webgpu/int8</text>
+<rect x="235" y="167" width="537.8" height="16" rx="3" fill="#6EA6DD" fill-opacity="1.00"><title>browser webgpu/int8 · p50: 1091.7125</title></rect>
+<text class="bar-value" x="777.8" y="179" text-anchor="start">1091.7</text>
+<rect x="235" y="186" width="556.8" height="16" rx="3" fill="#6EA6DD" fill-opacity="0.58"><title>browser webgpu/int8 · p95: 1130.2750</title></rect>
+<text class="bar-value" x="796.8" y="198" text-anchor="start">1130.3</text>
+<text class="label" x="225" y="234.5" text-anchor="end">browser wasm/fp32</text>
+<rect x="235" y="213" width="589.4" height="16" rx="3" fill="#E9A35E" fill-opacity="1.00"><title>browser wasm/fp32 · p50: 1196.4250</title></rect>
+<text class="bar-value" x="829.4" y="225" text-anchor="start">1196.4</text>
+<rect x="235" y="232" width="627.3" height="16" rx="3" fill="#E9A35E" fill-opacity="0.58"><title>browser wasm/fp32 · p95: 1273.3500</title></rect>
+<text class="bar-value" x="867.3" y="244" text-anchor="start">1273.3</text>
+<text class="label" x="225" y="280.5" text-anchor="end">browser wasm/int4</text>
+<rect x="235" y="259" width="607.0" height="16" rx="3" fill="#E9A35E" fill-opacity="1.00"><title>browser wasm/int4 · p50: 1232.2250</title></rect>
+<text class="bar-value" x="847.0" y="271" text-anchor="start">1232.2</text>
+<rect x="235" y="278" width="615.5" height="16" rx="3" fill="#E9A35E" fill-opacity="0.58"><title>browser wasm/int4 · p95: 1249.4175</title></rect>
+<text class="bar-value" x="855.5" y="290" text-anchor="start">1249.4</text>
+<text class="label" x="225" y="326.5" text-anchor="end">browser wasm/int8</text>
+<rect x="235" y="305" width="458.6" height="16" rx="3" fill="#E9A35E" fill-opacity="1.00"><title>browser wasm/int8 · p50: 930.9250</title></rect>
+<text class="bar-value" x="698.6" y="317" text-anchor="start">930.9</text>
+<rect x="235" y="324" width="488.1" height="16" rx="3" fill="#E9A35E" fill-opacity="0.58"><title>browser wasm/int8 · p95: 990.8125</title></rect>
+<text class="bar-value" x="728.1" y="336" text-anchor="start">990.8</text>
+<text class="label" x="225" y="372.5" text-anchor="end">native laptop-cpu</text>
+<rect x="235" y="351" width="197.4" height="16" rx="3" fill="#70BD8E" fill-opacity="1.00"><title>native laptop-cpu · p50: 400.7855</title></rect>
+<text class="bar-value" x="437.4" y="363" text-anchor="start">400.8</text>
+<rect x="235" y="370" width="233.2" height="16" rx="3" fill="#70BD8E" fill-opacity="0.58"><title>native laptop-cpu · p95: 473.3884</title></rect>
+<text class="bar-value" x="473.2" y="382" text-anchor="start">473.4</text>
+<line x1="244.8" y1="60" x2="244.8" y2="402" stroke="#98A4B3" stroke-width="3" stroke-dasharray="8 6"><title>Native H100 GPU p50</title></line>
+<rect x="660" y="24" width="12" height="12" fill="#6EA6DD"/>
+<text class="axis" x="677" y="35">WebGPU</text>
+<rect x="760" y="24" width="12" height="12" fill="#E9A35E"/>
+<text class="axis" x="777" y="35">WASM</text>
+<rect x="860" y="24" width="12" height="12" fill="#70BD8E"/>
+<text class="axis" x="877" y="35">Native</text>
+<line x1="235" y1="53" x2="263" y2="53" stroke="#98A4B3" stroke-width="3" stroke-dasharray="8 6"/>
+<text class="axis" x="270" y="57">Native H100 GPU p50</text>
+<text class="axis" x="235" y="35">p50 solid · p95 light</text>
+<text class="axis" x="580.0" y="448" text-anchor="middle">Inference latency (ms)</text>
+</svg>

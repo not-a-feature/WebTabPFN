@@ -12,7 +12,7 @@ export default defineConfig({
   webServer: {
     command: "python -m http.server 4173 --directory ..",
     url: "http://127.0.0.1:4173/benchmark/",
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
 });

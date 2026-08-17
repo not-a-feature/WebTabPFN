@@ -1,47 +1,48 @@
-export type Backend = "auto" | "webgpu" | "wasm";
-export type ConcreteBackend = Exclude<Backend, "auto">;
-export type Precision = "fp32" | "int4" | "int8";
+export type Task = "classification" | "regression";
+export type Backend = "webgpu" | "wasm";
+export type Precision = "int4" | "int8";
+export type RepositoryPrecision = "fp32" | Precision;
 
 export interface ModelSpec {
   readonly id: string;
+  readonly task: Task;
   readonly file: string;
-  readonly precision: Precision;
+  readonly precision: RepositoryPrecision;
   readonly bytes: number;
-  readonly sha256: string;
 }
 
-export const models: Readonly<Record<Precision, ModelSpec>> = Object.freeze({
-  fp32: Object.freeze({
-    id: "tabpfn-v2-fp32",
-    file: "models/tabpfn-v2-classifier-fp32-9557c06d.onnx",
-    precision: "fp32",
-    bytes: 29_454_872,
-    sha256: "9557c06dbd125d75dfe7a271f701be01e05111c5425000e01dc03ef12e624a25",
+const catalog: Readonly<Record<Task, Readonly<Record<RepositoryPrecision, ModelSpec>>>> = Object.freeze({
+  classification: Object.freeze({
+    fp32: model("classification", "fp32", "9557c06d", 29_454_872),
+    int4: model("classification", "int4", "1b9a8582", 5_126_894),
+    int8: model("classification", "int8", "8c5a7fbf", 8_046_373),
   }),
-  int4: Object.freeze({
-    id: "tabpfn-v2-int4",
-    file: "models/tabpfn-v2-classifier-int4-1b9a8582.onnx",
-    precision: "int4",
-    bytes: 5_126_894,
-    sha256: "1b9a85824cc6caa9f1546892f37b0f47f4445ff688169bbab018912f00bbe541",
+  regression: Object.freeze({
+    fp32: model("regression", "fp32", "26f7f49c", 44_825_959),
+    int4: model("regression", "int4", "56d5d4f3", 7_561_856),
+    int8: model("regression", "int8", "05b4ebe5", 11_947_285),
   }),
-  int8: Object.freeze({
-    id: "tabpfn-v2-int8",
-    file: "models/tabpfn-v2-classifier-int8-8c5a7fbf.onnx",
-    precision: "int8",
-    bytes: 8_046_373,
-    sha256: "8c5a7fbf5bb5c6e4fdbaeccbdd759cd2790f0d559c50b45a5512b95b862c6d60",
-  }),
+});
+
+export const models = Object.freeze({
+  classification: Object.freeze({ int4: catalog.classification.int4, int8: catalog.classification.int8 }),
+  regression: Object.freeze({ int4: catalog.regression.int4, int8: catalog.regression.int8 }),
 });
 
 export function hasWebGpu(): boolean {
   return typeof navigator !== "undefined" && "gpu" in navigator;
 }
 
-export function resolveBackend(requested: Backend = "auto"): ConcreteBackend {
-  return requested === "auto" ? (hasWebGpu() ? "webgpu" : "wasm") : requested;
+export function selectModel(task: Task, precision: RepositoryPrecision): ModelSpec {
+  return catalog[task][precision];
 }
 
-export function selectModel(backend: ConcreteBackend, precision?: Precision): ModelSpec {
-  return models[precision ?? (backend === "webgpu" ? "int4" : "int8")];
+function model(task: Task, precision: RepositoryPrecision, digest: string, bytes: number): ModelSpec {
+  return Object.freeze({
+    id: `tabpfn-v2-${task}-${precision}`,
+    task,
+    file: `models/tabpfn-v2-${task}-${precision}-${digest}.onnx`,
+    precision,
+    bytes,
+  });
 }

@@ -1,49 +1,49 @@
 (() => {
-  const defaultMatrix = [
-    { backend: "webgpu", precision: "fp32" },
-    { backend: "webgpu", precision: "int4" },
-    { backend: "webgpu", precision: "int8" },
-    { backend: "wasm", precision: "fp32" },
-    { backend: "wasm", precision: "int4" },
-    { backend: "wasm", precision: "int8" },
-  ];
-
   window.runWebTabPFNBenchmark = async (options = {}) => {
-    const reference = await fetchJson(options.referenceUrl ?? "./reference.json");
-    const configurations = options.configurations ?? defaultMatrix;
+    const reference = await fetchJson(options.referenceUrl ?? "./classification/reference.json");
+    const configurations = options.configurations ?? benchmarkMatrix(reference.task);
     const runs = options.runs ?? 5;
     const warmups = options.warmups ?? 1;
     const selectedCases = reference.cases.slice(0, options.caseLimit ?? reference.cases.length);
     const results = [];
 
     for (const configuration of configurations) {
-      progress(options, `Starting ${configuration.backend}/${configuration.precision}`);
+      let estimator;
+      if (configuration.task !== reference.task) {
+        throw new Error(`configuration task ${configuration.task} does not match ${reference.task} reference`);
+      }
+      progress(options, `Starting ${configuration.task}/${configuration.backend}/${configuration.precision}`);
       if (options.clearCache !== false) await WebTabPFN.clearCache();
       try {
         const cold = await WebTabPFN.preload(configuration);
         const warm = await WebTabPFN.preload(configuration);
-        progress(options, `Creating ${configuration.backend}/${configuration.precision} session`);
-        const classifier = await WebTabPFN.load(configuration);
+        progress(options, `Creating ${configuration.task}/${configuration.backend}/${configuration.precision} session`);
+        estimator = await WebTabPFN.load(configuration);
         const cases = [];
 
         for (const benchmarkCase of selectedCases) {
-          progress(options, `Running ${configuration.backend}/${configuration.precision}: ${benchmarkCase.name}`);
+          progress(options, `Running ${configuration.task}/${configuration.backend}/${configuration.precision}: ${benchmarkCase.name}`);
           const split = benchmarkCase.yTrain.length;
-          classifier.fit(benchmarkCase.x.slice(0, split), benchmarkCase.yTrain);
+          estimator.fit(benchmarkCase.x.slice(0, split), benchmarkCase.yTrain);
           const xTest = benchmarkCase.x.slice(split);
-          for (let index = 0; index < warmups; index += 1) await classifier.infer(xTest);
+          for (let index = 0; index < warmups; index += 1) await estimator.infer(xTest);
           const timings = [];
           let result;
           for (let index = 0; index < runs; index += 1) {
-            result = await classifier.infer(xTest);
+            result = await estimator.infer(xTest);
             timings.push(result.inferenceMs);
           }
           if (result === undefined) throw new Error("benchmark produced no inference result");
-          const metrics = classificationMetrics(benchmarkCase.yTest, result.probabilities);
-          const nativeMetrics = {
-            accuracy: benchmarkCase.python.metrics.accuracy,
-            mcc: benchmarkCase.python.metrics.mcc ?? matthewsCorrelation(benchmarkCase.yTest, benchmarkCase.python.predictions),
-          };
+          const classification = configuration.task === "classification";
+          const metrics = classification
+            ? classificationMetrics(benchmarkCase.yTest, result.probabilities)
+            : regressionMetrics(benchmarkCase.yTest, result.predictions);
+          const nativeMetrics = classification
+            ? {
+                accuracy: benchmarkCase.python.metrics.accuracy,
+                mcc: benchmarkCase.python.metrics.mcc ?? matthewsCorrelation(benchmarkCase.yTest, benchmarkCase.python.predictions),
+              }
+            : benchmarkCase.python.metrics;
           cases.push({
             name: benchmarkCase.name,
             rows: benchmarkCase.x.length,
@@ -54,31 +54,37 @@
             metrics,
             nativeMetrics,
             delta: {
-              accuracy: metrics.accuracy - nativeMetrics.accuracy,
-              mcc: metrics.mcc - nativeMetrics.mcc,
+              ...(classification
+                ? { accuracy: metrics.accuracy - nativeMetrics.accuracy, mcc: metrics.mcc - nativeMetrics.mcc }
+                : { mae: metrics.mae - nativeMetrics.mae, rmse: metrics.rmse - nativeMetrics.rmse, r2: metrics.r2 - nativeMetrics.r2 }),
             },
-            parity: parityMetrics(benchmarkCase.python.probabilities, result.probabilities),
+            parity: classification
+              ? classificationParity(benchmarkCase.python.probabilities, result.probabilities)
+              : regressionParity(benchmarkCase.python.predictions, result.predictions),
           });
         }
 
         results.push({
           ...configuration,
           status: "ok",
-          model: classifier.info.model,
+          model: estimator.info.model,
           coldModelLoadMs: cold.modelLoadMs,
           cachedModelLoadMs: warm.modelLoadMs,
-          sessionModelReadMs: classifier.info.modelLoadMs,
-          sessionCreateMs: classifier.info.sessionCreateMs,
+          sessionModelReadMs: estimator.info.modelLoadMs,
+          sessionCreateMs: estimator.info.sessionCreateMs,
           cases,
         });
       } catch (error) {
         results.push({ ...configuration, status: "error", error: message(error) });
+      } finally {
+        await estimator?.dispose();
       }
     }
 
     return {
       schemaVersion: 2,
       createdAt: new Date().toISOString(),
+      task: reference.task,
       kind: "browser",
       environment: await browserEnvironment(),
       benchmark: { runs, warmups, cases: selectedCases.map((value) => value.name) },
@@ -94,23 +100,24 @@
     runButton.disabled = true;
     try {
       const query = new URLSearchParams(location.search);
+      const task = query.get("task") ?? "classification";
       const matrix = query.get("matrix");
       const result = await window.runWebTabPFNBenchmark({
-        referenceUrl: query.get("reference") ?? undefined,
+        referenceUrl: query.get("reference") ?? `./${task}/reference.json`,
         runs: query.has("runs") ? Number.parseInt(query.get("runs"), 10) : undefined,
         warmups: query.has("warmups") ? Number.parseInt(query.get("warmups"), 10) : undefined,
         caseLimit: query.has("caseLimit") ? Number.parseInt(query.get("caseLimit"), 10) : undefined,
         clearCache: query.get("clearCache") !== "false",
         configurations: matrix === null ? undefined : matrix.split(",").map((value) => {
           const [backend, precision] = value.split(":");
-          return { backend, precision };
+          return { task, backend, precision };
         }),
         onProgress: (value) => { status.textContent = value; },
       });
       const json = `${JSON.stringify(result, null, 2)}\n`;
       output.textContent = json;
       download.href = URL.createObjectURL(new Blob([json], { type: "application/json" }));
-      download.download = "browser.json";
+      download.download = `browser-${task}.json`;
       download.hidden = false;
       status.textContent = "Benchmark complete";
     } catch (error) {
@@ -122,6 +129,12 @@
 
   function progress(options, value) {
     if (options.onProgress !== undefined) options.onProgress(value);
+  }
+
+  function benchmarkMatrix(task) {
+    return ["webgpu", "wasm"].flatMap((backend) =>
+      ["fp32", "int4", "int8"].map((precision) => ({ task, backend, precision })),
+    );
   }
 
   async function browserEnvironment() {
@@ -161,6 +174,20 @@
     return { accuracy: correct / yTrue.length, mcc: matthewsCorrelation(yTrue, predictions) };
   }
 
+  function regressionMetrics(yTrue, predictions) {
+    if (yTrue.length === 0 || yTrue.length !== predictions.length) throw new Error("regression inputs have incompatible lengths");
+    const mean = yTrue.reduce((sum, value) => sum + value, 0) / yTrue.length;
+    const errors = yTrue.map((value, index) => value - predictions[index]);
+    const absolute = errors.map(Math.abs);
+    const squared = errors.map((value) => value ** 2);
+    const total = yTrue.reduce((sum, value) => sum + (value - mean) ** 2, 0);
+    return {
+      mae: absolute.reduce((sum, value) => sum + value, 0) / yTrue.length,
+      rmse: Math.sqrt(squared.reduce((sum, value) => sum + value, 0) / yTrue.length),
+      r2: 1 - squared.reduce((sum, value) => sum + value, 0) / total,
+    };
+  }
+
   function matthewsCorrelation(yTrue, yPred) {
     if (yTrue.length === 0 || yTrue.length !== yPred.length) throw new Error("MCC inputs have incompatible lengths");
     const classes = Math.max(...yTrue, ...yPred) + 1;
@@ -177,7 +204,7 @@
     return denominator === 0 ? 0 : covariance / denominator;
   }
 
-  function parityMetrics(reference, candidate) {
+  function classificationParity(reference, candidate) {
     let absoluteSum = 0;
     let absoluteMaximum = 0;
     let count = 0;
@@ -195,6 +222,15 @@
       predictionAgreement: agreements / reference.length,
       probabilityMae: absoluteSum / count,
       probabilityMaxAbs: absoluteMaximum,
+    };
+  }
+
+  function regressionParity(reference, candidate) {
+    if (reference.length === 0 || reference.length !== candidate.length) throw new Error("regression parity inputs have incompatible lengths");
+    const differences = reference.map((value, index) => Math.abs(value - candidate[index]));
+    return {
+      predictionMae: differences.reduce((sum, value) => sum + value, 0) / differences.length,
+      predictionMaxAbs: Math.max(...differences),
     };
   }
 

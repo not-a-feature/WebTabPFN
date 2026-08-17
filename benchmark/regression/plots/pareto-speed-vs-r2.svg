@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 500" width="820" height="500" role="img" aria-label="Inference speed vs regression quality">
+<style>
+      text { font-family: ui-sans-serif, system-ui, sans-serif; fill: #172033 }
+      .axis { font-size: 12px; fill: #526070 }
+      .label { font-size: 13px }
+      .bar-value { font-size: 11px; font-weight: 600 }
+      .grid { stroke: #d9e0e8; stroke-width: 1 }
+    </style>
+<title>Inference speed vs regression quality</title>
+<text class="axis" x="435.0" y="482" text-anchor="middle">mean p50 inference latency (ms; lower is faster)</text>
+<text class="axis" transform="translate(20 240.0) rotate(-90)" text-anchor="middle">mean R² (higher is better)</text>
+<circle cx="85" cy="24" r="6" fill="#2878B5"/>
+<text class="axis" x="96" y="28">WebGPU</text>
+<circle cx="195" cy="24" r="6" fill="#E07A1F"/>
+<text class="axis" x="206" y="28">WASM</text>
+<circle cx="305" cy="24" r="6" fill="#26935C"/>
+<text class="axis" x="316" y="28">Native</text>
+<circle cx="415" cy="24" r="6" fill="#98A4B3"/>
+<text class="axis" x="426" y="28">Native H100 GPU</text>
+<line class="grid" x1="85.0" y1="50" x2="85.0" y2="430"/>
+<text class="axis" x="85.0" y="452" text-anchor="middle">0</text>
+<line class="grid" x1="85" y1="430.0" x2="785" y2="430.0"/>
+<text class="axis" x="75" y="434.0" text-anchor="end">0.715</text>
+<line class="grid" x1="225.0" y1="50" x2="225.0" y2="430"/>
+<text class="axis" x="225.0" y="452" text-anchor="middle">122</text>
+<line class="grid" x1="85" y1="354.0" x2="785" y2="354.0"/>
+<text class="axis" x="75" y="358.0" text-anchor="end">0.772</text>
+<line class="grid" x1="365.0" y1="50" x2="365.0" y2="430"/>
+<text class="axis" x="365.0" y="452" text-anchor="middle">244</text>
+<line class="grid" x1="85" y1="278.0" x2="785" y2="278.0"/>
+<text class="axis" x="75" y="282.0" text-anchor="end">0.829</text>
+<line class="grid" x1="505.0" y1="50" x2="505.0" y2="430"/>
+<text class="axis" x="505.0" y="452" text-anchor="middle">366</text>
+<line class="grid" x1="85" y1="202.0" x2="785" y2="202.0"/>
+<text class="axis" x="75" y="206.0" text-anchor="end">0.886</text>
+<line class="grid" x1="645.0" y1="50" x2="645.0" y2="430"/>
+<text class="axis" x="645.0" y="452" text-anchor="middle">488</text>
+<line class="grid" x1="85" y1="126.0" x2="785" y2="126.0"/>
+<text class="axis" x="75" y="130.0" text-anchor="end">0.943</text>
+<line class="grid" x1="785.0" y1="50" x2="785.0" y2="430"/>
+<text class="axis" x="785.0" y="452" text-anchor="middle">610</text>
+<line class="grid" x1="85" y1="50.0" x2="785" y2="50.0"/>
+<text class="axis" x="75" y="54.0" text-anchor="end">1.000</text>
+<polyline fill="none" stroke="#D98F8F" stroke-width="3" stroke-dasharray="7 5" points="201.9,315.0 229.1,295.0 421.4,293.8"/>
+<circle cx="107.8" cy="354.0" r="8" fill="#98A4B3" stroke="#fff" stroke-width="3"><title>native h100-gpu0: p50 19.84 ms, R² 0.7717; reference excluded from frontier</title></circle>
+<text class="label" x="119.8" y="342.0" text-anchor="start">Native H100 GPU</text>
+<circle cx="201.9" cy="315.0" r="8" fill="#2878B5" stroke="#D98F8F" stroke-width="3"><title>browser webgpu/int4: p50 101.90 ms, R² 0.8010</title></circle>
+<text class="label" x="189.9" y="303.0" text-anchor="end">browser webgpu/int4</text>
+<circle cx="229.1" cy="295.0" r="8" fill="#2878B5" stroke="#D98F8F" stroke-width="3"><title>browser webgpu/fp32: p50 125.63 ms, R² 0.8160</title></circle>
+<text class="label" x="241.1" y="283.0" text-anchor="start">browser webgpu/fp32</text>
+<circle cx="244.0" cy="353.5" r="8" fill="#26935C" stroke="#fff" stroke-width="3"><title>native cpu: p50 138.65 ms, R² 0.7721</title></circle>
+<text class="label" x="256.0" y="341.5" text-anchor="start">native cpu</text>
+<circle cx="421.4" cy="293.8" r="8" fill="#E07A1F" stroke="#D98F8F" stroke-width="3"><title>browser wasm/int8: p50 293.30 ms, R² 0.8169</title></circle>
+<text class="label" x="433.4" y="281.8" text-anchor="start">browser wasm/int8</text>
+<circle cx="502.8" cy="295.1" r="8" fill="#E07A1F" stroke="#fff" stroke-width="3"><title>browser wasm/fp32: p50 364.30 ms, R² 0.8160</title></circle>
+<text class="label" x="490.8" y="319.1" text-anchor="end">browser wasm/fp32</text>
+<circle cx="531.7" cy="315.9" r="8" fill="#E07A1F" stroke="#fff" stroke-width="3"><title>browser wasm/int4: p50 389.43 ms, R² 0.8003</title></circle>
+<text class="label" x="543.7" y="303.9" text-anchor="start">browser wasm/int4</text>
+<circle cx="721.4" cy="305.4" r="8" fill="#2878B5" stroke="#fff" stroke-width="3"><title>browser webgpu/int8: p50 554.83 ms, R² 0.8082</title></circle>
+<text class="label" x="709.4" y="329.4" text-anchor="end">browser webgpu/int8</text>
+</svg>

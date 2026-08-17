@@ -1,227 +1,201 @@
 # WebTabPFN
 
-TabPFN v2 classification in the browser from one classic script. WebTabPFN downloads a ready
-FP32, INT4, or INT8 model, caches it across pages with Cache Storage, uses WebGPU when available,
-and falls back to WASM. End users need no Python, package manager, build step, or quantization.
+TabPFN v2 classification and regression in the browser. WebTabPFN downloads a prepared ONNX
+model, caches it across pages, and runs it through an explicitly selected WebGPU or WASM
+backend. Input data never leaves the browser.
 
 > **Built with PriorLabs-TabPFN.** WebTabPFN is an independent, unofficial browser port and is
 > not affiliated with or endorsed by Prior Labs.
 
 ## Use
 
-Use an exact npm version through jsDelivr for a zero-install deployment. Loading the script does
-**not** download a model. The selected weights are fetched lazily when `load()` is called:
+Pin an exact npm version in production:
+
+WebTabPFN is distributed as a classic browser script, not an ESM/CommonJS import.
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/webtabpfn@0.1.0/src/webtabpfn.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/webtabpfn@0.2.0/src/webtabpfn.js"></script>
 <script>
-  const classifier = await WebTabPFN.load();
-
+  const classifier = await WebTabPFN.load({ task: "classification", backend: "wasm", precision: "int8" });
   classifier.fit(
-    [[0.1, 1.2], [0.2, 0.8], [1.1, 0.1], [0.9, 0.2]],
-    [0, 0, 1, 1],
+    [[0.1, "low"], [0.2, "low"], [1.1, "high"], [0.9, "high"]],
+    ["control", "control", "case", "case"],
   );
+  console.log(await classifier.predict([[0.8, "high"]]));
+  console.log(await classifier.predictProba([[0.8, "high"]]));
 
-  const predictions = await classifier.predict([[0.8, 0.3]]);
-  const probabilities = await classifier.predictProba([[0.8, 0.3]]);
-  console.log(predictions, probabilities, classifier.info);
+  const regressor = await WebTabPFN.load({ task: "regression", backend: "wasm", precision: "int8" });
+  regressor.fit([[0], [1], [2], [3]], [1, 3, 5, 7]);
+  console.log(await regressor.predict([[1.5], [4]]));
 </script>
 ```
 
-Pin an exact version in production; do not use an unversioned or `@latest` URL. To self-host,
-serve the contents of `src/` together and use `/path/to/src/webtabpfn.js` instead. Models and the
-ONNX Runtime assets resolve relative to the script URL unless their base URLs are overridden.
+`task` is required. Classification returns original labels and probabilities; regression returns
+raw-space mean predictions. Both estimators store their training context locally during `fit()`
+and run the model when `predict()` or `infer()` is awaited. Call `dispose()` when an estimator is
+no longer needed.
 
-Training labels must be dense integers starting at zero (`0..C-1`). Every row must contain the
-same number of numeric features. `fit()` stores the training context locally; inference happens
-when `predict()`, `predictProba()`, or `infer()` is awaited.
+### Preprocessing
 
-### Model selection
+- Numeric, string, boolean, `null`, and `NaN` feature values are accepted.
+- String and boolean columns are categorical. Numeric categorical columns can be declared with
+  `fit(x, y, { categoricalFeatures: [1, 3] })`.
+- Category mappings are learned from training rows only. Missing and unseen categories become
+  `NaN`, which TabPFN handles internally.
+- Rectangular train/test matrices with the same feature count are required. Infinite values fail.
+- Classification labels may be finite numbers, strings, or booleans and are encoded internally.
+- Regression targets must be finite numbers.
 
-`load()` accepts the following options:
+This is deliberately a small preprocessing contract, not full Python-estimator preprocessing.
 
-| Option | Values | Default |
-|---|---|---|
-| `backend` | `"auto"`, `"webgpu"`, `"wasm"` | `"auto"` |
-| `precision` | `"fp32"`, `"int4"`, `"int8"` | INT4 on WebGPU, INT8 on WASM |
-| `baseUrl` | Base directory for model assets | Directory containing `webtabpfn.js` |
-| `runtimeBaseUrl` | Base directory for ONNX Runtime assets | `baseUrl` |
-| `cache` | `true`, `false` | `true` |
-
-```javascript
-// Smallest download and the default WebGPU model.
-const compact = await WebTabPFN.load({ backend: "webgpu", precision: "int4" });
-
-// Default CPU/WASM choice: larger than INT4, but faster in the current benchmarks.
-const cpu = await WebTabPFN.load({ backend: "wasm", precision: "int8" });
-
-// Unquantized reference model.
-const reference = await WebTabPFN.load({ precision: "fp32" });
-```
-
-With `backend: "auto"`, WebTabPFN first uses WebGPU/INT4 when WebGPU is exposed by the browser.
-If WebGPU session creation fails, it retries with WASM/INT8. That fallback can download both
-models. Supplying an explicit `precision` keeps the same model precision during fallback.
-
-### Preloading and browser caching
-
-Preloading is optional. It downloads, verifies, and persistently caches weights but does not
-create an inference session. Normal `load()` remains lazy by default.
+### Loading, models, and cache
 
 ```javascript
-// For example, call this during an idle period or before opening a prediction view.
-await WebTabPFN.preload();
-
-// Uses the cached automatic default when the same model is selected.
-const classifier = await WebTabPFN.load();
-```
-
-To prepare both automatic paths in advance:
-
-```javascript
-await Promise.all([
-  WebTabPFN.preload({ backend: "webgpu", precision: "int4" }),
-  WebTabPFN.preload({ backend: "wasm", precision: "int8" }),
-]);
-```
-
-Cache management is explicit:
-
-```javascript
-const int4Ready = await WebTabPFN.isCached("int4");
-const int8Ready = await WebTabPFN.isCached("int8");
-
-// Download for this call without writing to Cache Storage.
-const temporary = await WebTabPFN.load({ precision: "int4", cache: false });
-
-// Remove every WebTabPFN model stored by this origin.
-await WebTabPFN.clearCache();
-```
-
-Cache Storage is shared by pages on the same origin, so a model downloaded on one page can be
-reused on another. It is not shared across unrelated websites, and browsers may evict stored data
-under storage pressure. Model filenames are content-hashed; new downloads are checked against
-their byte length and SHA-256 digest, and cached responses are length-checked before use.
-
-### Custom asset location
-
-Normally models and ONNX Runtime are resolved relative to `webtabpfn.js`. Override the locations
-when serving them from a separate static directory or CDN:
-
-```javascript
-const classifier = await WebTabPFN.load({
-  baseUrl: "https://cdn.example.org/webtabpfn/0.1.0/",
-  runtimeBaseUrl: "https://cdn.example.org/webtabpfn/0.1.0/",
+const model = await WebTabPFN.load({
+  task: "classification",
+  backend: "webgpu",           // "webgpu" or "wasm"
+  precision: "int4",           // "int4" or "int8" in npm
+  cache: true,
+  baseUrl: "https://cdn.example.org/webtabpfn/0.2.0/src/",
+  runtimeBaseUrl: "https://cdn.example.org/webtabpfn/0.2.0/src/",
 });
 ```
 
-Cross-origin asset servers must permit browser CORS requests.
+The npm package contains INT4 and INT8 for both tasks. Backend and precision are always explicit;
+WebTabPFN makes no automatic model or backend choice.
 
-The global API also exposes `models` for model metadata and `hasWebGpu()` for feature detection.
-`src/` is the directly deployable package: the library, ONNX Runtime assets, model license, and
-the three ready weights under `src/models/`.
+FP32 artifacts stay in the repository for validation and benchmarking but are excluded from the
+npm package to keep the npm/jsDelivr distribution compact and within this project's conservative
+100 MB unpacked-content budget. Use a repository checkout or self-hosted `baseUrl` when explicitly
+loading FP32; npm and jsDelivr distributions contain INT4 and INT8.
 
-## Layout
+Preloading downloads and verifies weights without creating a session:
 
-```text
-src/        browser library, runtime, license, and models/
-benchmark/  benchmark page, reference data, consolidated results, and plots/
-tests/      unit and browser tests plus Playwright configuration
-scripts/    build, export, quantization, benchmark, merge, and plotting tools
+```javascript
+await WebTabPFN.preload({ task: "regression", backend: "wasm", precision: "int8" });
+const ready = await WebTabPFN.isCached({ task: "regression", precision: "int8" });
+await WebTabPFN.clearCache();
 ```
 
-## Build and test
+Model filenames are content-hashed and downloads are checked for their expected byte length.
+`WebTabPFN.models` contains only the task-keyed INT4 and INT8 metadata shipped through npm.
 
-Node.js and pnpm are required only for development:
+### Browsers and serving requirements
+
+WebTabPFN bundles ONNX Runtime Web 1.27 and targets ES2022. Browser support follows the
+[ONNX Runtime Web support matrix](https://onnxruntime.ai/docs/get-started/with-javascript/web.html):
+
+| Backend | Supported browsers | Validation in this release |
+|---|---|---|
+| WASM | Current Chrome/Edge, Firefox, and Safari with WebAssembly SIMD and Cache Storage. ONNX Runtime explicitly lists Chrome/Edge on Windows, Android, macOS, and iOS; Safari on macOS and iOS; and Firefox on Windows. | Automated Chromium 151 tests on Windows. |
+| WebGPU | Chrome/Edge 113+ on Windows and macOS, and Chromium 121+ on Android, when the browser exposes a usable GPU adapter. ONNX Runtime Web does not currently list Safari, iOS browsers, or Firefox as supported WebGPU targets. | Chrome 151 on Windows with Intel Xe-LPG. |
+
+Serve production pages and assets over HTTPS. `http://localhost` and `http://127.0.0.1` are
+treated as trustworthy for local development; loading from `file://` is unsupported. WebGPU and
+the default `cache: true` path both depend on APIs restricted to secure contexts. Setting
+`cache: false` avoids persistent Cache Storage but does not make WebGPU available on an insecure
+origin. A self-hosted cross-origin asset server must allow CORS requests.
+
+Cross-origin isolation is not required. Without it, ONNX Runtime uses one WASM thread; when the
+page is cross-origin isolated, the runtime may use multiple threads. Backend selection is explicit:
+`hasWebGpu()` is only a feature check, and `load()` fails rather than silently falling back when a
+requested WebGPU adapter or session is unavailable.
+
+### Dataset limits
+
+The upstream TabPFN v2 design envelope is datasets with up to 10,000 samples and 500 features.
+The exported classification model has an additional hard limit of 10 classes. These are model
+limits, not a promise of interactive browser performance.
+
+The checked browser quality matrices cover the following, substantially smaller shapes:
+
+| Task | Training rows | Test rows per call | Features | Classes |
+|---|---:|---:|---:|---:|
+| Classification | 102-128 | 48 | 2-64 | 2-10 |
+| Regression | 64 | 24 | 10-20 | n/a |
+
+Model dimensions are dynamic, so WebTabPFN accepts larger row and feature counts within the
+upstream envelope, but shapes beyond this table are not release-qualified. Each prediction call
+materializes all training and test rows and runs the complete context; WebTabPFN does not
+subsample, truncate, or batch automatically. For larger datasets, benchmark the intended shape
+on the target browser and device. Prefer native TabPFN when approaching the upstream envelope or
+when browser memory and latency are unsuitable.
+
+## Development
 
 ```powershell
 pnpm install
 pnpm build
 pnpm test
 pnpm test:browser
-python -m http.server 8000
 ```
 
-The benchmark runner is available at <http://localhost:8000/benchmark/>.
+The deployable package is `src/`: the bundled library, ONNX Runtime assets, licences, and model
+artifacts. The benchmark page is served from `benchmark/`; task-specific references, results,
+experiments, and plots live under matching `classification/` and `regression/` directories.
 
-## Model preparation
+### Model preparation
 
-Model export and quantization are maintainer-only operations. Python 3.11 is required:
+Python 3.11 is required only to prepare models and native references:
 
 ```powershell
 py -3.11 -m venv .venv
 .venv\Scripts\pip install -r scripts\requirements.txt
-.venv\Scripts\python scripts\prepare-models.py
+.venv\Scripts\python scripts\prepare-models.py --task classification
+.venv\Scripts\python scripts\prepare-models.py --task regression
 pnpm build
 ```
 
-The script downloads the official TabPFN v2 classifier, validates its FP32 export, creates
-optimized INT4 and INT8 ONNX files, checks native parity, and publishes hashed weights to
-`src/models/`. Temporary checkpoints and intermediate models stay in the ignored `.build/`
-directory.
+The regression export is self-contained: it accepts raw training targets and returns raw-space
+bar-distribution means. Target normalization, regression borders, distribution reduction, and
+inverse transformation are embedded in the graph. Its INT8 and INT4 variants must pass raw-space
+ONNX parity thresholds before entering `src/models/`; npm publication additionally runs the
+classification and regression browser quality matrices.
 
-## Benchmarks
-
-- `scripts/benchmark-native.py` runs regular Python TabPFN on CPU or CUDA and writes the shared
-  cases and reference.
-- `scripts/benchmark-browser.js` measures all FP32, INT4, and INT8 combinations through the
-  public `WebTabPFN` API on WebGPU and WASM.
-- `scripts/merge-benchmarks.py` combines labeled JSON runs.
-- `scripts/plot-benchmarks.py` writes latency, accuracy, MCC, and speed-versus-accuracy SVGs.
-
-Generate a fresh native reference, serve the repository, and open the benchmark page:
+Generate Python references from the exact checkpoints prepared above with:
 
 ```powershell
-.venv\Scripts\python scripts\benchmark-native.py --device cpu
-python -m http.server 8000
+.venv\Scripts\python scripts\benchmark-native.py --task classification --device cpu --checkpoint .build\quantization\classification\source\tabpfn-v2-classifier.ckpt
+.venv\Scripts\python scripts\benchmark-native.py --task regression --device cpu --checkpoint .build\quantization\regression\source\tabpfn-v2-regressor.ckpt
 ```
 
-Every timing result includes raw runs, count, minimum, mean, standard deviation, p50, p75, p90,
-p95, p99, and maximum. Accuracy, MCC, prediction agreement, and probability drift are also saved.
-The reference contains eight deterministic cases: Breast Cancer, Wine, synthetic four-class,
-Iris, Digits, noisy Moons, noisy Circles, and an imbalanced synthetic three-class problem.
-The consolidated result is `benchmark/results.json`. Regenerate its plots with:
+Browser runs record latency and classification accuracy/MCC or regression MAE/RMSE/R², together
+with drift from the corresponding Python reference.
+
+![Classification inference speed versus accuracy](benchmark/classification/plots/pareto-speed-vs-accuracy.svg)
+
+![Regression inference speed versus R²](benchmark/regression/plots/pareto-speed-vs-r2.svg)
+
+Run the browser matrix at `http://localhost:4173/benchmark/?task=regression`. The checked-in
+results in `benchmark/regression/results.json` cover FP32, INT8, and INT4 on WASM and WebGPU. On
+the measured Intel Xe-LPG laptop, INT8 is the fastest WASM regression model while INT4 is the
+fastest WebGPU model; INT4 is 83% smaller than FP32 and trades some R² for that reduction.
+
+| Backend | Precision | Model | Mean p50 | Mean R² |
+|---|---:|---:|---:|---:|
+| WebGPU | FP32 | 44.83 MB | 125.6 ms | 0.816 |
+| WebGPU | INT4 | 7.56 MB | 101.9 ms | 0.801 |
+| WebGPU | INT8 | 11.95 MB | 554.8 ms | 0.808 |
+| WASM | FP32 | 44.83 MB | 364.3 ms | 0.816 |
+| WASM | INT4 | 7.56 MB | 389.4 ms | 0.800 |
+| WASM | INT8 | 11.95 MB | 293.3 ms | 0.817 |
+
+These are means across the three checked-in regression cases, with five measured runs per case
+after one warmup. WebGPU used Chrome 151 on Intel Xe-LPG. The dashed native reference uses the
+same cases and checkpoint on an NVIDIA H100 PCIe GPU.
+
+Generate the checked-in SVGs, including dashed Native H100 GPU lines, with:
 
 ```powershell
-python scripts\plot-benchmarks.py
+.venv\Scripts\python scripts\plot-benchmarks.py --input benchmark\classification\results.json --output benchmark\classification\plots
+.venv\Scripts\python scripts\plot-benchmarks.py --input benchmark\regression\results.json --output benchmark\regression\plots
 ```
 
-SVG output is written to `benchmark/plots/`.
+## Licence
 
-### Experimental floating-point formats
+WebTabPFN source is Apache-2.0; see `LICENSE`. The model weights use the Prior Labs licence in
+`src/TABPFN_MODEL_LICENSE.txt`. Any distribution using the weights must include that licence and
+prominently display the exact attribution **Built with PriorLabs-TabPFN**.
 
-FP16, weight-only FP8 E4M3FN, and blockwise FP4 were tested with ONNX Runtime Web 1.27 on the
-Intel Xe-LPG laptop WebGPU adapter. They are not shipped because none improves the deployable
-trade-off:
-
-| Format | Model bytes | Result |
-|---|---:|---|
-| FP16 | 14,745,318 | Session runs, but produces non-finite logits |
-| FP8 | 7,623,461 | WebGPU session creation fails |
-| FP4 | 4,902,696 | Runs, but averages 1,517 ms p50, 0.932 accuracy, and 0.903 MCC |
-| INT4 | 5,126,894 | Averages 148 ms p50, 0.945 accuracy, and 0.919 MCC |
-
-The recorded runs are in `benchmark/fp16-fp8-webgpu.json` and `benchmark/fp4-webgpu.json`.
-
-### Current benchmark plots
-
-![Latency percentiles](benchmark/plots/latency-percentiles.svg)
-
-![Accuracy](benchmark/plots/accuracy.svg)
-
-![MCC](benchmark/plots/mcc.svg)
-
-![Speed versus accuracy](benchmark/plots/pareto-speed-vs-accuracy.svg)
-
-## License
-
-WebTabPFN's original source code is licensed under Apache-2.0; see `LICENSE`.
-
-The TabPFN weights under `src/models/` use the Prior Labs License v1.2 in
-`src/TABPFN_MODEL_LICENSE.txt`. Any website, interface, blog post, about page, product
-documentation, or other distribution using the weights must include that license and prominently
-display the exact attribution **Built with PriorLabs-TabPFN**.
-
-The bundled ONNX Runtime Web 1.27.0 runtime is licensed by Microsoft under the MIT License. Its
-license and bundled-component notices are included in `src/ONNXRUNTIME_LICENSE.txt` and
-`src/ONNXRUNTIME_THIRD_PARTY_NOTICES.txt`.
+The bundled ONNX Runtime Web is MIT-licensed; its licence and third-party notices are included in
+`src/ONNXRUNTIME_LICENSE.txt` and `src/ONNXRUNTIME_THIRD_PARTY_NOTICES.txt`.

@@ -15,44 +15,47 @@ FRONT_COLOR = "#D98F8F"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Plot WebTabPFN benchmark results as SVG")
-    parser.add_argument("--input", type=Path, default=Path("benchmark/results.json"))
-    parser.add_argument("--output", type=Path, default=Path("benchmark/plots"))
+    parser.add_argument("--input", type=Path, default=Path("benchmark/classification/results.json"))
+    parser.add_argument("--output", type=Path, default=Path("benchmark/classification/plots"))
     return parser.parse_args()
 
 
 def browser_rows(results: dict) -> list[dict]:
     rows = []
-    for configuration in results["browser"]["laptop"]["configurations"]:
-        cases = configuration["cases"]
-        rows.append(
-            {
+    task = results["task"]
+    for run in results["browser"].values():
+        for configuration in run["configurations"]:
+            cases = configuration["cases"]
+            row = {
                 "label": f'browser {configuration["backend"]}/{configuration["precision"]}',
                 "kind": configuration["backend"],
+                "reference_label": None,
                 "precision": configuration["precision"],
                 "bytes": configuration["model"]["bytes"],
                 "p50": mean(case["timingMs"]["p50"] for case in cases),
                 "p95": mean(case["timingMs"]["p95"] for case in cases),
-                "accuracy": mean(case["metrics"]["accuracy"] for case in cases),
-                "mcc": mean(case["metrics"]["mcc"] for case in cases),
             }
-        )
+            metrics = ("accuracy", "mcc") if task == "classification" else ("mae", "rmse", "r2")
+            row.update({metric: mean(case["metrics"][metric] for case in cases) for metric in metrics})
+            rows.append(row)
     return rows
 
 
 def native_rows(results: dict) -> list[dict]:
     rows = []
+    task = results["task"]
     for name, run in results["native"].items():
         cases = run["cases"]
-        rows.append(
-            {
-                "label": f"native {name}",
-                "kind": "native",
-                "p50": mean(case["python"]["timingMs"]["predict"]["p50"] for case in cases),
-                "p95": mean(case["python"]["timingMs"]["predict"]["p95"] for case in cases),
-                "accuracy": mean(case["python"]["metrics"]["accuracy"] for case in cases),
-                "mcc": mean(case["python"]["metrics"]["mcc"] for case in cases),
-            }
-        )
+        row = {
+            "label": f"native {name}",
+            "kind": "native",
+            "reference_label": run["referenceLabel"] if "referenceLabel" in run else None,
+            "p50": mean(case["python"]["timingMs"]["predict"]["p50"] for case in cases),
+            "p95": mean(case["python"]["timingMs"]["predict"]["p95"] for case in cases),
+        }
+        metrics = ("accuracy", "mcc") if task == "classification" else ("mae", "rmse", "r2")
+        row.update({metric: mean(case["python"]["metrics"][metric] for case in cases) for metric in metrics})
+        rows.append(row)
     return rows
 
 
@@ -61,6 +64,7 @@ def document(title: str, width: int, height: int, body: list[str]) -> str:
       text { font-family: ui-sans-serif, system-ui, sans-serif; fill: #172033 }
       .axis { font-size: 12px; fill: #526070 }
       .label { font-size: 13px }
+      .bar-value { font-size: 11px; font-weight: 600 }
       .grid { stroke: #d9e0e8; stroke-width: 1 }
     """
     return (
@@ -79,10 +83,15 @@ def horizontal_plot(
     fields: tuple[tuple[str, str], ...],
     minimum: float,
     maximum: float,
-    reference: tuple[str, float] | None = None,
+    references: tuple[tuple[str, float], ...] = (),
 ) -> str:
     assert maximum > minimum
-    width, left, right, top, row_height = 960, 235, 35, 55, 46
+    for row in rows:
+        for field, _label in fields:
+            assert minimum <= row[field] <= maximum, (row["label"], field, row[field])
+    for reference_label, reference_value in references:
+        assert minimum <= reference_value <= maximum, (reference_label, reference_value)
+    width, left, right, top, row_height = 960, 235, 35, 75, 46
     plot_bottom = top + len(rows) * row_height + 5
     height = plot_bottom + 58
     plot_width = width - left - right
@@ -98,20 +107,11 @@ def horizontal_plot(
                 f'<text class="axis" x="{x:.1f}" y="{plot_bottom + 22}" text-anchor="middle">{tick}</text>',
             )
         )
-    if reference is not None:
-        reference_label, reference_value = reference
-        displayed = min(max(reference_value, minimum), maximum)
-        x = left + (displayed - minimum) / (maximum - minimum) * plot_width
-        label_x = x + 15
-        label_y = (top - 15 + plot_bottom) / 2
-        reference_overlay.extend(
-            (
-                f'<line x1="{x:.1f}" y1="{top - 15}" x2="{x:.1f}" y2="{plot_bottom}" stroke="{REFERENCE_COLOR}" stroke-width="3" stroke-dasharray="8 6">'
-                f'<title>{escape(reference_label)}</title></line>',
-                f'<text class="axis" x="{label_x:.1f}" y="{label_y:.1f}" text-anchor="middle" fill="{REFERENCE_COLOR}" '
-                f'transform="rotate(-90 {label_x:.1f} {label_y:.1f})" style="paint-order:stroke;stroke:#fff;stroke-width:4px;stroke-linejoin:round">'
-                f'{escape(reference_label)}</text>',
-            )
+    for reference_label, reference_value in references:
+        x = left + (reference_value - minimum) / (maximum - minimum) * plot_width
+        reference_overlay.append(
+            f'<line x1="{x:.1f}" y1="{top - 15}" x2="{x:.1f}" y2="{plot_bottom}" stroke="{REFERENCE_COLOR}" stroke-width="3" stroke-dasharray="8 6">'
+            f'<title>{escape(reference_label)}</title></line>'
         )
     bar_height = 16 if len(fields) == 2 else 24
     bar_group_height = len(fields) * bar_height + (len(fields) - 1) * 3
@@ -124,25 +124,49 @@ def horizontal_plot(
         for field_index, (field, label) in enumerate(fields):
             value = row[field]
             bar_y = y + field_index * (bar_height + 3)
-            displayed = min(max(value, minimum), maximum)
-            bar_width = (displayed - minimum) / (maximum - minimum) * plot_width
+            bar_width = (value - minimum) / (maximum - minimum) * plot_width
             color = TYPE_COLORS[row["kind"]]
             opacity = 1.0 if field_index == 0 else 0.58
             body.append(
                 f'<rect x="{left}" y="{bar_y}" width="{bar_width:.1f}" height="{bar_height}" rx="3" fill="{color}" fill-opacity="{opacity:.2f}">'
                 f'<title>{escape(row["label"])} · {escape(label)}: {value:.4f}</title></rect>'
             )
+            value_text = f"{value:.1f}" if maximum >= 10 else f"{value:.3f}"
+            bar_end = left + bar_width
+            fits_outside = bar_end + len(value_text) * 7 + 8 <= left + plot_width
+            value_x = bar_end + 5 if fits_outside else bar_end - 5
+            value_anchor = "start" if fits_outside else "end"
+            value_style = "" if fits_outside else ' style="fill:#fff"'
+            body.append(
+                f'<text class="bar-value" x="{value_x:.1f}" y="{bar_y + bar_height - 4}" '
+                f'text-anchor="{value_anchor}"{value_style}>{value_text}</text>'
+            )
     body.extend(reference_overlay)
-    legend_x = width - 300
-    for index, (kind, label) in enumerate((("webgpu", "WebGPU"), ("wasm", "WASM"), ("native", "Native"))):
+    legend_items = [
+        (kind, label)
+        for kind, label in (("webgpu", "WebGPU"), ("wasm", "WASM"), ("native", "Native"))
+        if any(row["kind"] == kind for row in rows)
+    ]
+    legend_x = width - len(legend_items) * 100
+    for index, (kind, label) in enumerate(legend_items):
         body.extend(
             (
                 f'<rect x="{legend_x + index * 100}" y="24" width="12" height="12" fill="{TYPE_COLORS[kind]}"/>',
                 f'<text class="axis" x="{legend_x + 17 + index * 100}" y="35">{escape(label)}</text>',
             )
         )
+    for index, (reference_label, _reference_value) in enumerate(references):
+        reference_x = left + index * 190
+        body.extend(
+            (
+                f'<line x1="{reference_x}" y1="53" x2="{reference_x + 28}" y2="53" stroke="{REFERENCE_COLOR}" stroke-width="3" stroke-dasharray="8 6"/>',
+                f'<text class="axis" x="{reference_x + 35}" y="57">{escape(reference_label)}</text>',
+            )
+        )
     if len(fields) == 2:
-        body.append('<text class="axis" x="235" y="35">p50 solid · p95 light</text>')
+        body.append(
+            f'<text class="axis" x="235" y="35">{escape(fields[0][1])} solid · {escape(fields[1][1])} light</text>'
+        )
     body.append(
         f'<text class="axis" x="{left + plot_width / 2:.1f}" y="{height - 12}" text-anchor="middle">'
         f'{escape(x_label)}</text>'
@@ -150,31 +174,31 @@ def horizontal_plot(
     return document(title, width, height, body)
 
 
-def pareto_plot(rows: list[dict]) -> str:
-    ordered = sorted(rows, key=lambda row: (row["p50"], -row["accuracy"]))
-    eligible = [row for row in ordered if "h100" not in row["label"].lower()]
+def pareto_plot(rows: list[dict], quality: str, quality_label: str, title: str) -> str:
+    ordered = sorted(rows, key=lambda row: (row["p50"], -row[quality]))
+    eligible = [row for row in ordered if row["reference_label"] is None]
     front = []
-    best_accuracy = float("-inf")
+    best_quality = float("-inf")
     for row in eligible:
-        if row["accuracy"] > best_accuracy:
+        if row[quality] > best_quality:
             front.append(row)
-            best_accuracy = row["accuracy"]
+            best_quality = row[quality]
 
     width, height, left, right, top, bottom = 820, 500, 85, 35, 50, 70
     plot_width, plot_height = width - left - right, height - top - bottom
     max_latency = max(row["p50"] for row in ordered) * 1.1
-    min_accuracy = min(row["accuracy"] for row in ordered)
-    y_min = max(0.0, min_accuracy - max(0.01, (1 - min_accuracy) * 0.25))
+    minimum_quality = min(row[quality] for row in ordered)
+    y_min = max(0.0, minimum_quality - max(0.01, (1 - minimum_quality) * 0.25))
 
     def point(row: dict) -> tuple[float, float]:
         return (
             left + row["p50"] / max_latency * plot_width,
-            top + (1 - row["accuracy"]) / (1 - y_min) * plot_height,
+            top + (1 - row[quality]) / (1 - y_min) * plot_height,
         )
 
     body = [
         f'<text class="axis" x="{left + plot_width / 2}" y="{height - 18}" text-anchor="middle">mean p50 inference latency (ms; lower is faster)</text>',
-        f'<text class="axis" transform="translate(20 {top + plot_height / 2}) rotate(-90)" text-anchor="middle">mean accuracy (higher is better)</text>',
+        f'<text class="axis" transform="translate(20 {top + plot_height / 2}) rotate(-90)" text-anchor="middle">mean {escape(quality_label)} (higher is better)</text>',
     ]
     legend_items = (("webgpu", "WebGPU"), ("wasm", "WASM"), ("native", "Native"))
     for index, (kind, label) in enumerate(legend_items):
@@ -185,24 +209,27 @@ def pareto_plot(rows: list[dict]) -> str:
                 f'<text class="axis" x="{legend_x + 11}" y="28">{label}</text>',
             )
         )
+    references = [row for row in ordered if row["reference_label"] is not None]
+    assert len(references) == 1
+    reference = references[0]
     reference_x = left + len(legend_items) * 110
     body.extend(
         (
             f'<circle cx="{reference_x}" cy="24" r="6" fill="{REFERENCE_COLOR}"/>',
-            f'<text class="axis" x="{reference_x + 11}" y="28">H100 reference</text>',
+            f'<text class="axis" x="{reference_x + 11}" y="28">{escape(reference["reference_label"])}</text>',
         )
     )
     for index in range(6):
         latency = max_latency * index / 5
         x = left + plot_width * index / 5
-        accuracy = y_min + (1 - y_min) * index / 5
+        quality_tick = y_min + (1 - y_min) * index / 5
         y = top + plot_height - plot_height * index / 5
         body.extend(
             (
                 f'<line class="grid" x1="{x:.1f}" y1="{top}" x2="{x:.1f}" y2="{top + plot_height}"/>',
                 f'<text class="axis" x="{x:.1f}" y="{top + plot_height + 22}" text-anchor="middle">{latency:.0f}</text>',
                 f'<line class="grid" x1="{left}" y1="{y:.1f}" x2="{left + plot_width}" y2="{y:.1f}"/>',
-                f'<text class="axis" x="{left - 10}" y="{y + 4:.1f}" text-anchor="end">{accuracy:.3f}</text>',
+                f'<text class="axis" x="{left - 10}" y="{y + 4:.1f}" text-anchor="end">{quality_tick:.3f}</text>',
             )
         )
     if len(front) > 1:
@@ -216,11 +243,11 @@ def pareto_plot(rows: list[dict]) -> str:
     for row in ordered:
         x, y = point(row)
         on_front = row in front
-        excluded = "h100" in row["label"].lower()
-        label = "H100 reference" if excluded else row["label"]
+        excluded = row["reference_label"] is not None
+        label = row["reference_label"] if excluded else row["label"]
         body.append(
             f'<circle cx="{x:.1f}" cy="{y:.1f}" r="8" fill="{REFERENCE_COLOR if excluded else PARETO_TYPE_COLORS[row["kind"]]}" stroke="{FRONT_COLOR if on_front else "#fff"}" stroke-width="3">'
-            f'<title>{escape(row["label"])}: p50 {row["p50"]:.2f} ms, accuracy {row["accuracy"]:.4f}{"; reference excluded from frontier" if excluded else ""}</title></circle>'
+            f'<title>{escape(row["label"])}: p50 {row["p50"]:.2f} ms, {escape(quality_label)} {row[quality]:.4f}{"; reference excluded from frontier" if excluded else ""}</title></circle>'
         )
         text_width = len(label) * 7.2
         candidates = (
@@ -256,20 +283,24 @@ def pareto_plot(rows: list[dict]) -> str:
         body.append(
             f'<text class="label" x="{text_x:.1f}" y="{text_y:.1f}" text-anchor="{anchor}">{escape(label)}</text>'
         )
-    return document("Inference speed vs accuracy", width, height, body)
+    return document(title, width, height, body)
 
 
 def main() -> None:
     args = parse_args()
     results = json.loads(args.input.read_text(encoding="utf-8"))
+    assert results["schemaVersion"] == 2
+    task = results["task"]
     browser = browser_rows(results)
     all_rows = browser + native_rows(results)
     assert browser
     assert all_rows
-    h100_rows = [row for row in all_rows if "h100" in row["label"].lower()]
-    assert len(h100_rows) == 1
-    comparison_rows = [row for row in all_rows if row is not h100_rows[0]]
-    h100 = h100_rows[0]
+    references = [row for row in all_rows if row["reference_label"] is not None]
+    assert len(references) == 1
+    reference = references[0]
+    reference_label = reference["reference_label"]
+    comparison_rows = [row for row in all_rows if row is not reference]
+    latency_maximum = max(row["p95"] for row in all_rows) * 1.1
     args.output.mkdir(parents=True, exist_ok=True)
     plots = {
         "latency-percentiles.svg": horizontal_plot(
@@ -278,31 +309,71 @@ def main() -> None:
             comparison_rows,
             (("p50", "p50"), ("p95", "p95")),
             0,
-            1300,
-            ("H100 p50 reference", h100["p50"]),
+            latency_maximum,
+            ((f"{reference_label} p50", reference["p50"]),),
         ),
-        "accuracy.svg": horizontal_plot(
-            "Accuracy averaged across benchmark datasets",
-            "Accuracy",
-            comparison_rows,
-            (("accuracy", "accuracy"),),
-            0.5,
-            1.0,
-            ("H100 accuracy reference", h100["accuracy"]),
-        ),
-        "mcc.svg": horizontal_plot(
-            "MCC averaged across benchmark datasets",
-            "Matthews correlation coefficient",
-            comparison_rows,
-            (("mcc", "MCC"),),
-            0.5,
-            1.0,
-            ("H100 MCC reference", h100["mcc"]),
-        ),
-        "pareto-speed-vs-accuracy.svg": pareto_plot(all_rows),
     }
-    (args.output / "pareto-size-vs-mcc.svg").unlink(missing_ok=True)
-    (args.output / "accuracy-mcc.svg").unlink(missing_ok=True)
+    if task == "classification":
+        plots.update(
+            {
+                "accuracy.svg": horizontal_plot(
+                    "Accuracy averaged across benchmark datasets",
+                    "Accuracy",
+                    browser,
+                    (("accuracy", "accuracy"),),
+                    max(0.0, min(row["accuracy"] for row in browser) - 0.05),
+                    1.0,
+                    ((f"{reference_label} accuracy", reference["accuracy"]),),
+                ),
+                "mcc.svg": horizontal_plot(
+                    "MCC averaged across benchmark datasets",
+                    "Matthews correlation coefficient",
+                    browser,
+                    (("mcc", "MCC"),),
+                    max(0.0, min(row["mcc"] for row in browser) - 0.05),
+                    1.0,
+                    ((f"{reference_label} MCC", reference["mcc"]),),
+                ),
+                "pareto-speed-vs-accuracy.svg": pareto_plot(
+                    all_rows,
+                    "accuracy",
+                    "accuracy",
+                    "Inference speed vs accuracy",
+                ),
+            }
+        )
+    else:
+        plots.update(
+            {
+                "r2.svg": horizontal_plot(
+                    "R² averaged across regression benchmark datasets",
+                    "R²",
+                    comparison_rows,
+                    (("r2", "R²"),),
+                    max(-1.0, min(row["r2"] for row in all_rows) - 0.05),
+                    min(1.0, max(row["r2"] for row in all_rows) + 0.05),
+                    ((f"{reference_label} R²", reference["r2"]),),
+                ),
+                "errors.svg": horizontal_plot(
+                    "Regression errors averaged across benchmark datasets",
+                    "Target units (lower is better)",
+                    comparison_rows,
+                    (("mae", "MAE"), ("rmse", "RMSE")),
+                    0,
+                    max(max(row["mae"], row["rmse"]) for row in all_rows) * 1.1,
+                    (
+                        (f"{reference_label} MAE", reference["mae"]),
+                        (f"{reference_label} RMSE", reference["rmse"]),
+                    ),
+                ),
+                "pareto-speed-vs-r2.svg": pareto_plot(
+                    all_rows,
+                    "r2",
+                    "R²",
+                    "Inference speed vs regression quality",
+                ),
+            }
+        )
     for name, svg in plots.items():
         (args.output / name).write_text(svg, encoding="utf-8")
     print(f"Wrote {len(plots)} SVG plots to {args.output}")

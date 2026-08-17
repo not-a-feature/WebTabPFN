@@ -2,40 +2,46 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib
-import importlib.util
 import json
 import os
 import platform
-import socket
 import time
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import psutil
 import sklearn
 import tabpfn
 import torch
 from sklearn.datasets import (
     load_breast_cancer,
+    load_diabetes,
     load_digits,
     load_iris,
     load_wine,
     make_circles,
     make_classification,
     make_moons,
+    make_regression,
 )
-from sklearn.metrics import accuracy_score, balanced_accuracy_score, log_loss, matthews_corrcoef
-from sklearn.model_selection import StratifiedShuffleSplit
-from tabpfn import TabPFNClassifier
+from sklearn.metrics import (
+    accuracy_score,
+    balanced_accuracy_score,
+    log_loss,
+    matthews_corrcoef,
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score,
+)
+from sklearn.model_selection import ShuffleSplit, StratifiedShuffleSplit
+from tabpfn import TabPFNClassifier, TabPFNRegressor
 from tabpfn.constants import ModelVersion
-
-psutil = importlib.import_module("psutil") if importlib.util.find_spec("psutil") is not None else None
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate regular-Python TabPFN v2 benchmark references")
-    parser.add_argument("--output", type=Path, default=Path("benchmark/reference.json"))
+    parser.add_argument("--task", choices=("classification", "regression"), required=True)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--n-estimators", type=int, default=1)
@@ -47,7 +53,29 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def datasets(seed: int) -> list[tuple[str, np.ndarray, np.ndarray]]:
+def datasets(seed: int, task: str) -> list[tuple[str, np.ndarray, np.ndarray]]:
+    if task == "regression":
+        diabetes = load_diabetes()
+        synthetic_x, synthetic_y = make_regression(
+            n_samples=640,
+            n_features=20,
+            n_informative=12,
+            noise=8.0,
+            random_state=seed,
+        )
+        offset_x, offset_y = make_regression(
+            n_samples=640,
+            n_features=12,
+            n_informative=8,
+            noise=20.0,
+            bias=10_000.0,
+            random_state=seed + 1,
+        )
+        return [
+            ("diabetes", diabetes.data.astype(np.float32), diabetes.target.astype(np.float32)),
+            ("synthetic", synthetic_x.astype(np.float32), synthetic_y.astype(np.float32)),
+            ("synthetic_offset", offset_x.astype(np.float32), offset_y.astype(np.float32)),
+        ]
     breast = load_breast_cancer()
     digits = load_digits()
     iris = load_iris()
@@ -102,22 +130,23 @@ def split_dataset(
     train_rows: int,
     test_rows: int,
     seed: int,
+    task: str,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     assert x.ndim == 2
     assert y.ndim == 1
     assert x.shape[0] == y.shape[0]
     assert train_rows + test_rows <= x.shape[0]
-    splitter = StratifiedShuffleSplit(
+    splitter = (StratifiedShuffleSplit if task == "classification" else ShuffleSplit)(
         n_splits=1,
         train_size=train_rows,
         test_size=test_rows,
         random_state=seed,
     )
-    train_indices, test_indices = next(splitter.split(x, y))
+    train_indices, test_indices = next(splitter.split(x, y if task == "classification" else None))
     return x[train_indices], x[test_indices], y[train_indices], y[test_indices]
 
 
-def make_classifier(args: argparse.Namespace) -> TabPFNClassifier:
+def make_estimator(args: argparse.Namespace) -> TabPFNClassifier | TabPFNRegressor:
     assert args.n_estimators >= 1
     common = {
         "device": args.device,
@@ -127,12 +156,15 @@ def make_classifier(args: argparse.Namespace) -> TabPFNClassifier:
     }
     if args.checkpoint is not None:
         checkpoint = args.checkpoint.resolve(strict=True)
-        return TabPFNClassifier(model_path=checkpoint, **common)
-    return TabPFNClassifier.create_default_for_version(version=ModelVersion.V2, **common)
+        estimator = TabPFNClassifier if args.task == "classification" else TabPFNRegressor
+        return estimator(model_path=checkpoint, **common)
+    estimator = TabPFNClassifier if args.task == "classification" else TabPFNRegressor
+    return estimator.create_default_for_version(version=ModelVersion.V2, **common)
 
 
 def evaluate_case(
-    classifier: TabPFNClassifier,
+    estimator: TabPFNClassifier | TabPFNRegressor,
+    task: str,
     name: str,
     x_train: np.ndarray,
     x_test: np.ndarray,
@@ -146,37 +178,49 @@ def evaluate_case(
     assert warmups >= 0
     rss_samples = [rss_bytes()]
     for _ in range(warmups):
-        classifier.fit(x_train, y_train)
-        classifier.predict_proba(x_test)
+        estimator.fit(x_train, y_train)
+        if task == "classification":
+            assert isinstance(estimator, TabPFNClassifier)
+            estimator.predict_proba(x_test)
+        else:
+            assert isinstance(estimator, TabPFNRegressor)
+            estimator.predict(x_test)
         synchronize(device)
 
     fit_timings: list[float] = []
     predict_timings: list[float] = []
-    probabilities: np.ndarray | None = None
+    output: np.ndarray | None = None
     for _ in range(runs):
         synchronize(device)
         fit_started = time.perf_counter()
-        classifier.fit(x_train, y_train)
+        estimator.fit(x_train, y_train)
         synchronize(device)
         fit_timings.append((time.perf_counter() - fit_started) * 1000)
         rss_samples.append(rss_bytes())
 
         predict_started = time.perf_counter()
-        probabilities = classifier.predict_proba(x_test)
+        if task == "classification":
+            assert isinstance(estimator, TabPFNClassifier)
+            output = estimator.predict_proba(x_test)
+        else:
+            assert isinstance(estimator, TabPFNRegressor)
+            output = estimator.predict(x_test)
         synchronize(device)
         predict_timings.append((time.perf_counter() - predict_started) * 1000)
         rss_samples.append(rss_bytes())
 
-    assert probabilities is not None
-    assert probabilities.shape == (x_test.shape[0], np.unique(y_train).size)
-    predictions = np.argmax(probabilities, axis=1)
-    return {
+    assert output is not None
+    result: dict[str, Any] = {
         "name": name,
         "x": np.concatenate([x_train, x_test], axis=0).tolist(),
         "yTrain": y_train.tolist(),
         "yTest": y_test.tolist(),
-        "python": {
-            "probabilities": probabilities.tolist(),
+    }
+    if task == "classification":
+        assert output.shape == (x_test.shape[0], np.unique(y_train).size)
+        predictions = np.argmax(output, axis=1)
+        result["python"] = {
+            "probabilities": output.tolist(),
             "predictions": predictions.tolist(),
             "fitMs": float(np.median(fit_timings)),
             "predictMs": float(np.median(predict_timings)),
@@ -188,11 +232,28 @@ def evaluate_case(
             "metrics": {
                 "accuracy": float(accuracy_score(y_test, predictions)),
                 "balancedAccuracy": float(balanced_accuracy_score(y_test, predictions)),
-                "logLoss": float(log_loss(y_test, probabilities, labels=np.arange(probabilities.shape[1]))),
+                "logLoss": float(log_loss(y_test, output, labels=np.arange(output.shape[1]))),
                 "mcc": float(matthews_corrcoef(y_test, predictions)),
             },
-        },
-    }
+        }
+    else:
+        assert output.shape == (x_test.shape[0],)
+        result["python"] = {
+            "predictions": output.tolist(),
+            "fitMs": float(np.median(fit_timings)),
+            "predictMs": float(np.median(predict_timings)),
+            "timingMs": {
+                "fit": timing_summary(fit_timings),
+                "predict": timing_summary(predict_timings),
+            },
+            "sampledPeakRssMb": max(rss_samples) / (1024 * 1024),
+            "metrics": {
+                "mae": float(mean_absolute_error(y_test, output)),
+                "rmse": float(np.sqrt(mean_squared_error(y_test, output))),
+                "r2": float(r2_score(y_test, output)),
+            },
+        }
+    return result
 
 
 def synchronize(device: str) -> None:
@@ -218,30 +279,21 @@ def timing_summary(values: list[float]) -> dict[str, Any]:
 
 
 def rss_bytes() -> int:
-    if psutil is not None:
-        return int(psutil.Process().memory_info().rss)
-    resource = importlib.import_module("resource")
-    return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024)
+    return int(psutil.Process().memory_info().rss)
 
 
 def total_memory_bytes() -> int:
-    if psutil is not None:
-        return int(psutil.virtual_memory().total)
-    fields = {
-        line.split(":", 1)[0]: line.split(":", 1)[1].strip()
-        for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines()
-    }
-    return int(fields["MemTotal"].split()[0]) * 1024
+    return int(psutil.virtual_memory().total)
 
 
 def environment(device: str, n_estimators: int) -> dict[str, Any]:
     value: dict[str, Any] = {
-        "hostname": socket.gethostname(),
+        "hostname": "redacted",
         "python": platform.python_version(),
         "platform": platform.platform(),
         "processor": platform.processor(),
         "cpuLogical": os.cpu_count(),
-        "cpuPhysical": None if psutil is None else psutil.cpu_count(logical=False),
+        "cpuPhysical": psutil.cpu_count(logical=False),
         "memoryGb": total_memory_bytes() / (1024**3),
         "tabpfn": tabpfn.__version__,
         "sklearn": sklearn.__version__,
@@ -269,10 +321,10 @@ def main() -> None:
     assert args.runs >= 1
     assert args.warmups >= 0
     create_started = time.perf_counter()
-    classifier = make_classifier(args)
-    classifier_create_ms = (time.perf_counter() - create_started) * 1000
+    estimator = make_estimator(args)
+    estimator_create_ms = (time.perf_counter() - create_started) * 1000
     cases: list[dict[str, Any]] = []
-    for index, (name, x, y) in enumerate(datasets(args.seed)):
+    for index, (name, x, y) in enumerate(datasets(args.seed, args.task)):
         case_test_rows = min(args.test_rows, x.shape[0] - 16)
         case_train_rows = min(args.train_rows, x.shape[0] - case_test_rows)
         x_train, x_test, y_train, y_test = split_dataset(
@@ -281,10 +333,12 @@ def main() -> None:
             case_train_rows,
             case_test_rows,
             args.seed + index,
+            args.task,
         )
         cases.append(
             evaluate_case(
-                classifier,
+                estimator,
+                args.task,
                 name,
                 x_train,
                 x_test,
@@ -298,16 +352,18 @@ def main() -> None:
     payload = {
         "schemaVersion": 2,
         "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "modelId": "tabpfn-v2-classifier",
+        "task": args.task,
+        "modelId": f"tabpfn-v2-{args.task}",
         "checkpointSha256": (
             sha256_file(args.checkpoint.resolve(strict=True)) if args.checkpoint is not None else None
         ),
         "environment": environment(args.device, args.n_estimators),
         "benchmark": {"runs": args.runs, "warmups": args.warmups},
-        "classifierCreateMs": classifier_create_ms,
+        "estimatorCreateMs": estimator_create_ms,
         "cases": cases,
     }
-    write_json(args.output.resolve(), payload)
+    output = args.output or Path(f"benchmark/{args.task}/reference.json")
+    write_json(output.resolve(), payload)
 
 
 def sha256_file(path: Path) -> str:
